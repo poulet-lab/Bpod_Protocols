@@ -1,0 +1,11 @@
+function softcodeFcn(Byte)
+    global BpodSystem
+
+    switch(Byte)
+        case 1
+            disp('Press button to start ...')
+        case 2
+            S = BpodSystem.ProtocolSettings
+            sprintf('Waiting %f',S.WaitActual)
+    end
+end

@@ -1,0 +1,115 @@
+function PushButton_Test 
+global BpodSystem
+clc
+
+if ~exist('PsychtoolboxVersion','file')
+    error('Please install Psychtoolbox-3')
+end
+
+MaxTrials = 1000;
+
+% Define parameters and trial structure
+S = BpodSystem.ProtocolSettings;
+if isempty(S) || isempty(fieldnames(S))
+    S.Baseline = 32;
+    S.Duration = 2000;
+    S.Amplitudes = [5 10];
+    S.WaitMin = 1000;
+    S.WaitMax = 5000;
+    S.Timeout = 5000;
+end
+S.Gain = 0.5;
+S.SamplingRateOut = 1000;
+
+% Configure WavePlayer Module
+W = BpodWavePlayer(BpodSystem.ModuleUSB.WavePlayer1);
+W.OutputRange = '-5V:5V';
+W.SamplingRate = S.SamplingRateOut;
+W.TriggerProfileEnable = 'On';
+W.BpodEvents{1} = 'On';
+S.waveformBase = ones(1,round(S.SamplingRateOut*S.Duration/1000+1));
+W.TriggerProfiles = zeros(64,4);
+for ii = 1:numel(S.Amplitudes)
+    S.waveformActual{ii} = S.waveformBase * S.Amplitudes(ii) * S.Gain;
+    W.loadWaveform(ii,S.waveformActual{ii});
+    W.TriggerProfiles(ii,1) = ii;
+    LoadSerialMessages('WavePlayer1', {['P' ii-1]}, ii);
+end
+clear W
+
+% Add softcode handler
+BpodSystem.SoftCodeHandlerFunction = 'softcodeFcn';
+
+
+%% Main loop (runs once per trial)
+for currentTrial = 1:MaxTrials
+    
+    % Randomized wait period
+    S.WaitActual = (rand*(S.WaitMax-S.WaitMin)+S.WaitMin)/1000;
+    
+    % Assemble state machine
+    sma = NewStateMachine();
+    sma = AddState(sma, 'Name', 'RandomDelay', ...
+        'Timer', S.WaitActual,...
+        'StateChangeConditions', {'Button1_Press', 'Timeout1', 'Tup', 'Stimulus'}, ...
+        'OutputActions', {'SoftCode', 2});
+    sma = AddState(sma, 'Name', 'Timeout1', ...
+        'Timer', S.Timeout/1000,...
+        'StateChangeConditions', {'Button1_Press', 'Timeout2', 'Tup', 'Stimulus'}, ...
+        'OutputActions', {'SoftCode', 3});
+    sma = AddState(sma, 'Name', 'Timeout2', ...
+        'Timer', S.Timeout/1000,...
+        'StateChangeConditions', {'Button1_Press', 'Timeout1', 'Tup', 'Stimulus'}, ...
+        'OutputActions', {'SoftCode', 3});
+    sma = AddState(sma, 'Name', 'Stimulus', ...
+        'Timer', 0.01,...
+        'StateChangeConditions', {'Tup', 'WaitForPlayback'}, ...
+        'OutputActions', {'WavePlayer1', 1, 'SoftCode', 4}); 
+    sma = AddState(sma, 'Name', 'WaitForPlayback', ...
+        'Timer', 0,...
+        'StateChangeConditions', {'Button1_Press','Success','WavePlayer1_1', 'EndOfStimulus'}, ...
+        'OutputActions', {'SoftCode', 5});
+    sma = AddState(sma, 'Name', 'Success', ...
+        'Timer', 0,...
+        'StateChangeConditions', {'WavePlayer1_1', 'EndOfStimulus'}, ...
+        'OutputActions', {'SoftCode', 6});
+    sma = AddState(sma, 'Name', 'EndOfStimulus', ...
+        'Timer', 1,...
+        'StateChangeConditions', {'Tup', 'exit'}, ...
+        'OutputActions', {'SoftCode', 7}); 
+    SendStateMatrix(sma);
+
+    % Start first trial by pressing button
+    if currentTrial == 1
+        disp('<strong>Press and release button to start paradigm.</strong>')
+        BpodSystem.StartModuleRelay('Button1');
+        while true
+            try
+                if ModuleRead('Button1',1) == 1
+                    BpodSystem.StopModuleRelay;
+                    disp('Starting ...')
+                    pause(1)
+                    break
+                end
+            catch
+            end
+        end
+    end    
+    fprintf('\n<strong>Trial %d</strong>\n',currentTrial)
+    
+    % Run the trial and return events
+    RawEvents = RunStateMatrix;
+    
+    if ~isempty(fieldnames(RawEvents))
+        BpodSystem.Data = AddTrialEvents(BpodSystem.Data,RawEvents);
+        BpodSystem.Data.TrialSettings(currentTrial) = S;
+        SaveBpodSessionData;
+        
+        % Update online plots
+    end
+    
+    HandlePauseCondition;
+    if BpodSystem.Status.BeingUsed == 0
+        return
+    end
+end
