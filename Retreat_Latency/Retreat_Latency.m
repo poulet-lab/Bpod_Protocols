@@ -1,19 +1,18 @@
-function PushButton_Test 
+function Retreat_Latency
 global BpodSystem
 clc
 
-if ~exist('PsychtoolboxVersion','file')
-    error('Please install Psychtoolbox-3')
-end
-
-MaxTrials = 1000;
+% if ~exist('PsychtoolboxVersion','file')
+%     error('Please install Psychtoolbox-3')
+% end
 
 % Define parameters and trial structure
 S = BpodSystem.ProtocolSettings;
 if isempty(S) || isempty(fieldnames(S))
+    S.nTrials = 20;
     S.Baseline = 32;
     S.Duration = 2000;
-    S.Amplitudes = [5 10];
+    S.Amplitudes = 10;
     S.WaitMin = 1000;
     S.WaitMax = 5000;
     S.Timeout = 5000;
@@ -42,7 +41,7 @@ BpodSystem.SoftCodeHandlerFunction = 'softcodeFcn';
 
 
 %% Main loop (runs once per trial)
-for currentTrial = 1:MaxTrials
+for currentTrial = 1:S.nTrials
     
     % Randomized wait period
     S.WaitActual = (rand*(S.WaitMax-S.WaitMin)+S.WaitMin)/1000;
@@ -126,7 +125,7 @@ for currentTrial = 1:MaxTrials
         SaveBpodSessionData;
         
         % Update online plots
-        %StateTiming
+        plot_responses
     end
     
     HandlePauseCondition;
